@@ -6,9 +6,11 @@ import threading
 import time,sys
 
 class Task:
-    batch_size = 1000 # 每批次的任务数量
-    iterations = 100 # 迭代次数
-    capacity = 10_000 # 生物的总容量
+    
+    iterations = 400 # 迭代次数
+    capacity = 1_000_000 # 生物的总容量
+    threads = 5
+    batch_size = int(capacity//(threads*16))# 每批次的任务数量
     mutation_rate = 0.05 # 变异率
     rng = np.random.default_rng()
     parent = rng.random(capacity,dtype=np.float32) # 父代生男性概率,前面是男性，后面是女性
@@ -18,45 +20,35 @@ class Task:
     offspring_female:int = capacity # 后代中女性开始的位置
     queue_male: queue.Queue[np.ndarray] = queue.Queue() # 男性队列
     queue_female: queue.Queue[np.ndarray] = queue.Queue() # 女性队列
-    task_queue: queue.Queue[Task]= queue.Queue() # 任务队列
+    task_queue: queue.Queue['Task']= queue.Queue() # 任务队列
 
     returns_male:np.ndarray = np.zeros(iterations,dtype=np.float32) # 每次迭代的男性比例
     returns_variance:np.ndarray = np.zeros(iterations,dtype=np.float32)  # 方差
 
 
     def __init__(self,count:int):
-        '''任务初始化
-        
+        '''任务初始化        
         :param count: 任务数量
         '''
         self.count = count
+        self._rng = np.random.default_rng() # 每个任务独立RNG，避免线程竞争
 
 
     def run(self):
-        '''运行任务'''
-        sub = np.zeros(self.count,dtype=np.float32)
-        male = 0
-        female = self.count - 1
-        for _ in range(self.count):
-            # 从父代male获得概率
-            p_male = self.parent[self.rng.integers(0, self.parent_male)]
-            # 从父代female获得概率
-            p_female = self.parent[self.rng.integers(self.parent_male, self.capacity)]
-            # 计算后代male和female的概率
-            p_offspring = (p_male + p_female) / 2 + self.rng.normal(0, self.mutation_rate) # 加入变异
-            p_offspring = np.clip(p_offspring, 0.0, 1.0) # 限制在0~1之间
-            # 判断子代性别
-            if self.rng.random() < p_offspring:
-                # 男性
-                sub[male] = p_offspring
-                male += 1
-            else:
-                # 女性
-                sub[female] = p_offspring
-                female -= 1
+        '''运行任务（向量化版本）'''
+        count = self.count
+        rng = self._rng
+        # 批量随机选父亲和母亲
+        p_males = self.parent[rng.integers(0, self.parent_male, size=count)]
+        p_females = self.parent[rng.integers(self.parent_male, self.capacity, size=count)]
+        # 批量计算后代基因值 + 变异
+        p_offspring = (p_males + p_females) / 2 + rng.normal(0, self.mutation_rate, size=count).astype(np.float32)
+        np.clip(p_offspring, 0.0, 1.0, out=p_offspring)
+        # 批量判断性别
+        is_male = rng.random(count, dtype=np.float32) < p_offspring
         # 任务完成放入队列
-        self.queue_male.put(sub[:male])
-        self.queue_female.put(sub[female+1:])
+        self.queue_male.put(p_offspring[is_male])
+        self.queue_female.put(p_offspring[~is_male])
 
 def run_thread():
     '''运行线程，处理任务队列'''
@@ -111,7 +103,7 @@ def simulate(parent_male=0.5):
                 empty = True
 
             if empty:
-                time.sleep(0.1) # 等待任务完成
+                time.sleep(0.001) # 短暂等待任务完成
                 print(f"迭代{i}等待任务完成，剩余:{Task.offspring_female - Task.offspring_male}")
 
         if Task.offspring_female - Task.offspring_male != 0:
@@ -144,22 +136,11 @@ def show():
 
 if __name__ == "__main__":
     t0=time.time()
-    init_threads(5)
-    parent_male = 0.7 # 初始父代男性比例
+    init_threads(Task.threads)
+    parent_male = 0.9991 #Task.rng.random() # 初始父代男性比例
+    print(f"初始父代男性比例{parent_male:.4f}")
     simulate(parent_male)
     print(f"总耗时{time.time() - t0:.2f}秒")
     show()
-
-
-
-
-
-
-
-            
-
-
-
-    
 
 

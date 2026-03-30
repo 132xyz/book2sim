@@ -3,9 +3,9 @@ import matplotlib.pyplot as plt
 import time
 
 # 参数
-ITERATIONS = 100
-CAPACITY = 10_000
-MUTATION_RATE = 0.01
+ITERATIONS = 1000
+CAPACITY = 1_000_000
+MUTATION_RATE = 0.05
 
 rng = np.random.default_rng()
 
@@ -16,23 +16,20 @@ def simulate(parent_male_ratio=0.5):
     returns_male = np.zeros(ITERATIONS, dtype=np.float32)
 
     for i in range(ITERATIONS):
-        male_idx = 0
-        female_idx = CAPACITY - 1
-
-        for _ in range(CAPACITY):
-            # 随机选一个父亲和一个母亲
-            p_male = parent[rng.integers(0, parent_male)]
-            p_female = parent[rng.integers(parent_male, CAPACITY)]
-            # 平均 + 变异
-            p_offspring = (p_male + p_female) / 2 + rng.normal(0, MUTATION_RATE)
-            p_offspring = np.clip(p_offspring, 0.0, 1.0)
-            # 判断子代性别
-            if rng.random() < p_offspring:
-                offspring[male_idx] = p_offspring
-                male_idx += 1
-            else:
-                offspring[female_idx] = p_offspring
-                female_idx -= 1
+        # 批量随机选父亲和母亲
+        p_males = parent[rng.integers(0, parent_male, size=CAPACITY)]
+        p_females = parent[rng.integers(parent_male, CAPACITY, size=CAPACITY)]
+        # 批量计算后代基因值 + 变异
+        p_all = (p_males + p_females) / 2 + rng.normal(0, MUTATION_RATE, size=CAPACITY).astype(np.float32)
+        np.clip(p_all, 0.0, 1.0, out=p_all)
+        # 批量判断性别
+        is_male = rng.random(CAPACITY, dtype=np.float32) < p_all
+        males = p_all[is_male]
+        females = p_all[~is_male]
+        male_idx = len(males)
+        # 写入offspring数组（男性在前，女性在后）
+        offspring[:male_idx] = males
+        offspring[CAPACITY - len(females):] = females
 
         # 统计男性比例
         returns_male[i] = male_idx / CAPACITY
